@@ -1,3 +1,10 @@
+-- [[
+--    Acyuta Awesome WM config 1.0
+--    github.com/art-awe 
+--
+-- ]]
+
+
 -- Standard awesome library
 local gears = require("gears")
 local awful = require("awful")
@@ -10,17 +17,22 @@ local beautiful = require("beautiful")
 -- Notification library
 local naughty = require("naughty")
 local menubar = require("menubar")
+local lain = require("lain")
+
+
+-- Устанавливаем локаль
+os.setlocale(os.getenv("LANGR"))
+
 
 -- {{{ Error handling
--- Check if awesome encountered an error during startup and fell back to
--- another config (This code will only ever execute for the fallback config)
+-- Ошибки при загрузке конфига. Вылазит окошко
 if awesome.startup_errors then
     naughty.notify({ preset = naughty.config.presets.critical,
                      title = "Вай-вай, ошибки во время загрузки",
                      text = awesome.startup_errors })
 end
 
--- Handle runtime errors after startup
+-- Ошибки после загрузки конфига
 do
     local in_error = false
     awesome.connect_signal("debug::error", function (err)
@@ -33,6 +45,17 @@ do
                          text = err })
         in_error = false
     end)
+end
+-- }}}
+
+-- {{{ Autostart applications
+function run_once(cmd)
+  findme = cmd
+  firstspace = cmd:find(" ")
+  if firstspace then
+    findme = cmd:sub(0, firstspace-1)
+  end
+  awful.util.spawn_with_shell("pgrep -u $USER -x " .. findme .. " > /dev/null || (" .. cmd .. ")")
 end
 -- }}}
 
@@ -49,10 +72,20 @@ beautiful.init(homedir .. "/.config/awesome/themes/default/theme.lua")
 
 -- Управляющая клавиша для событий
 modkey = "Mod4"
+browser = "chromium"
+gui_editor = "subl3"
+
+
+-- {{{ Автозапуск 
+run_once(terminal)
+-- установка раскладки
+run_once("setxkbmap -option \"grp:caps_toggle,grp_led:scroll\" -layout \"us,ru\"")
+
+-- }}}
+
 
 -- Список шаблонов расположений окон рабочего стола
-local layouts =
-{
+local layouts = {
     awful.layout.suit.floating, -- свободный, без привязки
     awful.layout.suit.tile, -- обычный тайловый сбоку
     awful.layout.suit.tile.top, -- --//-- cнизу
@@ -61,6 +94,7 @@ local layouts =
 -- }}}
 
 -- {{{ Wallpaper
+ -- Установка на все экраны картинки
 if beautiful.wallpaper then
     for s = 1, screen.count() do
         gears.wallpaper.maximized(beautiful.wallpaper, s, true)
@@ -81,28 +115,82 @@ end
 
 -- {{{ Menu
 -- Create a laucher widget and a main menu
-myawesomemenu = {
-   { "manual", terminal .. " -e man awesome" },
-   { "edit config", editor_cmd .. " " .. awesome.conffile },
-   { "restart", awesome.restart },
-   { "quit", awesome.quit }
-}
 
-mymainmenu = awful.menu({ items = { { "awesome", myawesomemenu, beautiful.awesome_icon },
-                                    { "open terminal", terminal }
-                                  }
-                        })
+mymainmenu = awful.menu.new({ items = require("menugen").build_menu(),
+                              theme = { height = 16, width = 130 }})
 
 mylauncher = awful.widget.launcher({ image = beautiful.awesome_icon,
                                      menu = mymainmenu })
-
--- Menubar configuration
-menubar.utils.terminal = terminal -- Set the terminal for applications that require it
 -- }}}
 
 -- {{{ Wibox
+markup = lain.util.markup
+white  = beautiful.fg_focus
+gray   = "#858585"
+font_monospace = 'monospace'
+
 -- Create a textclock widget
-mytextclock = awful.widget.textclock()
+mytextclock = awful.widget.textclock(markup(gray, " %a")
+.. markup(white, " %d ") .. markup(gray, "%b ") ..  markup(white, "%H:%M "))
+
+-- Прилепим календарь к часам
+lain.widgets.calendar:attach(mytextclock, { fg = white , 
+                              font = font_monospace, 
+                              font_size = 9})
+
+-- MPD
+mpdwidget = lain.widgets.mpd({
+  settings = function()
+    mpd_notification_preset.fg = white
+    artist = mpd_now.artist .. " "
+    title = mpd_now.title .. " "
+
+    if mpd_now.state == "pause" then
+      artist = "mpd "
+      title = " paused "
+    elseif mpd_now.state == "stop" then
+      artist = ""
+      title = ""
+    end
+
+    widget:set_markup(markup(gray, artist) .. markup(white, title))
+  end
+})
+
+--Battery 
+batwidget = lain.widgets.bat({
+    settings = function()
+        bat_header = " Бат "
+        bat_p      = bat_now.perc .. " "
+
+        if bat_now.status == "Not present" then
+            bat_header = ""
+            bat_p      = ""
+        end
+        if bat_now.status == "Charging" then
+            bat_header = "В "
+            bat_p      = "Зарядке"
+        end
+        widget:set_markup(markup(gray, bat_header) .. markup(white, bat_p))
+    end
+})
+
+-- ALSA volume
+volumewidget = lain.widgets.alsa({
+    settings = function()
+        header = " Vol "
+        vlevel  = volume_now.level
+
+        if volume_now.status == "off" then
+            vlevel = vlevel .. "M "
+        else
+            vlevel = vlevel .. " "
+        end
+
+        widget:set_markup(markup(gray, header) .. markup(white, vlevel))
+    end
+})
+
 
 -- Create a wibox for each screen and add it
 mywibox = {}
@@ -165,14 +253,15 @@ for s = 1, screen.count() do
                            awful.button({ }, 3, function () awful.layout.inc(layouts, -1) end),
                            awful.button({ }, 4, function () awful.layout.inc(layouts, 1) end),
                            awful.button({ }, 5, function () awful.layout.inc(layouts, -1) end)))
-    -- Create a taglist widget
+
+    -- Создание панели тегов
     mytaglist[s] = awful.widget.taglist(s, awful.widget.taglist.filter.all, mytaglist.buttons)
 
-    -- Create a tasklist widget
+    -- Создание полоскик для отображения текущих окошек
     mytasklist[s] = awful.widget.tasklist(s, awful.widget.tasklist.filter.currenttags, mytasklist.buttons)
 
-    -- Create the wibox
-    mywibox[s] = awful.wibox({ position = "top", screen = s })
+    -- Создание панельки сверху (самой линейки)
+    mywibox[s] = awful.wibox({ position = "top", screen = s, height = 18})
 
     -- Widgets that are aligned to the left
     local left_layout = wibox.layout.fixed.horizontal()
@@ -183,6 +272,9 @@ for s = 1, screen.count() do
     -- Widgets that are aligned to the right
     local right_layout = wibox.layout.fixed.horizontal()
     if s == 1 then right_layout:add(wibox.widget.systray()) end
+    right_layout:add(mpdwidget)
+    right_layout:add(batwidget)
+    right_layout:add(volumewidget)
     right_layout:add(mytextclock)
     right_layout:add(mylayoutbox[s])
 
@@ -196,6 +288,7 @@ for s = 1, screen.count() do
 end
 -- }}}
 
+
 -- {{{ Mouse bindings
 root.buttons(awful.util.table.join(
     awful.button({ }, 3, function () mymainmenu:toggle() end),
@@ -206,10 +299,11 @@ root.buttons(awful.util.table.join(
 
 -- {{{ Key bindings
 globalkeys = awful.util.table.join(
+  --Движение по тегам
     awful.key({ modkey,           }, "Left",   awful.tag.viewprev       ),
     awful.key({ modkey,           }, "Right",  awful.tag.viewnext       ),
     awful.key({ modkey,           }, "Escape", awful.tag.history.restore),
-
+    -- Переход между окнами
     awful.key({ modkey,           }, "j",
         function ()
             awful.client.focus.byidx( 1)
@@ -220,6 +314,7 @@ globalkeys = awful.util.table.join(
             awful.client.focus.byidx(-1)
             if client.focus then client.focus:raise() end
         end),
+    -- показывает меню
     awful.key({ modkey,           }, "w", function () mymainmenu:show() end),
 
     -- Layout manipulation
@@ -239,7 +334,7 @@ globalkeys = awful.util.table.join(
     -- Standard program
     awful.key({ modkey,           }, "Return", function () awful.util.spawn(terminal) end),
     awful.key({ modkey, "Control" }, "r", awesome.restart),
-    awful.key({ modkey, "Shift"   }, "q", awesome.quit),
+    awful.key({ modkey, "Shift"   }, R, awesome.quit),
 
     awful.key({ modkey,           }, "l",     function () awful.tag.incmwfact( 0.05)    end),
     awful.key({ modkey,           }, "h",     function () awful.tag.incmwfact(-0.05)    end),
@@ -435,3 +530,8 @@ end)
 client.connect_signal("focus", function(c) c.border_color = beautiful.border_focus end)
 client.connect_signal("unfocus", function(c) c.border_color = beautiful.border_normal end)
 -- }}}
+
+
+-- Чтобы с флешками было просто
+os.execute ("pgrep -u $USER -x spacefm -d || (spacefm -d &)")
+run_once('nm-applet')
